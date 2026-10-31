@@ -30,6 +30,8 @@ uv build
 
 When changing dependencies, run `uv lock` and commit it with `pyproject.toml`.
 Provider and PostgreSQL tests are opt-in; default tests use fake providers and SQLite.
+The search-helper tests also require `ripgrep`; the supplied E2B template and CI
+workflow install it. Run repository checks inside E2B as described in `AGENTS.md`.
 Alternatively, run `python3 scripts/verify.py` to check the lock, install into
 `.merlin/verification-venv`, and execute these checks plus offline evaluations and
 Compose syntax validation. It stops at the first failed step. Use `--dry-run` to

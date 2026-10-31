@@ -84,6 +84,11 @@ Verification completed on 2026-10-31:
   verified against its published release SHA-256, and the example environment.
   This did not start containers or establish a successful deployed restore.
 
+During repository publication, GitHub Actions also passed the actual
+container/PostgreSQL/API worker-crash recovery smoke job using fake model and
+sandbox providers. This closes that image/stack smoke check, while full deployed
+backup restoration and live-provider quality/latency gates remain open.
+
 The combined-suite run caught a stdout formatting compatibility regression; it
 was corrected before the final pass. Broker review also added a regression for
 a successful GitHub write returning unreadable JSON: it remains uncertain and
