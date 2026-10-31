@@ -1,0 +1,58 @@
+Screen { background: $background; color: $foreground; }
+#top { height: 3; padding: 1 2 0 2; border-bottom: solid $panel; }
+#brand { width: 12; color: $primary; text-style: bold; }
+#context { width: 1fr; height: 1; text-wrap: nowrap; text-overflow: ellipsis; }
+#connection { width: auto; max-width: 35; color: $text-muted; margin-left: 2; }
+#body { height: 1fr; }
+#sidebar { width: 29; padding: 1; border-right: solid $panel; }
+#sidebar Button { width: 100%; margin-bottom: 1; }
+.section-label { height: 2; padding-top: 1; color: $text-muted; }
+#sessions { height: 1fr; background: $background; border: none; }
+#sessions > .option-list--option { padding: 1 0; }
+#main { width: 1fr; padding: 0 2; }
+#history-controls { height: 1; }
+#history-controls Button { height: 1; min-height: 1; min-width: 16; border: none; padding: 0 1; color: $text-muted; margin-right: 1; }
+#timeline { height: 1fr; padding: 1 0; scrollbar-size: 1 1; }
+#welcome { margin: 3 2; color: $text-muted; text-align: center; }
+.message { height: auto; padding: 1 1; margin-bottom: 1; }
+.message.user { background: $surface; border-left: tall $primary; }
+.message.notice { color: $warning; }
+.role { height: 1; margin-bottom: 1; color: $primary; text-style: bold; }
+.message Markdown { padding: 0; background: transparent; }
+.message MarkdownFence { margin: 1 0; }
+.tool-card { height: auto; padding: 0; margin: 0 0 1 0; background: $surface; border: none; }
+.tool-card > Contents { padding: 1; }
+.tool-error { border-left: tall $warning; }
+#task-bar { height: 3; align-vertical: middle; }
+#task-status { width: 1fr; height: 1; color: $text-muted; text-wrap: nowrap; text-overflow: ellipsis; }
+#task-bar Button { min-width: 8; height: 3; margin-left: 1; }
+#composer { height: 5; max-height: 9; border: round $primary; background: $surface; }
+#composer:focus { border: round $primary; }
+#composer-footer { height: 3; align-vertical: middle; }
+#composer-hint { width: 1fr; height: 1; color: $text-muted; text-wrap: nowrap; text-overflow: ellipsis; }
+#usage-status { width: auto; max-width: 24; color: $text-muted; margin: 0 1; }
+#send { width: 15; min-width: 15; height: 3; padding: 0 1; }
+#references { height: auto; max-height: 7; border: solid $primary; background: $surface; }
+#new-activity { width: auto; height: 1; min-height: 1; border: none; padding: 0 1; color: $primary; }
+Footer { background: $panel; }
+ModalScreen { align: center middle; background: $background 75%; }
+.dialog { width: 76; max-width: 96%; height: auto; max-height: 94%; padding: 1 2; border: round $primary; background: $surface; }
+.dialog-title { height: auto; margin-bottom: 1; text-style: bold; color: $primary; }
+.dialog Input { margin: 1 0; }
+.dialog .hint { height: auto; color: $text-muted; }
+.picker { height: 22; }
+.picker OptionList { height: 1fr; background: $surface; }
+.large-dialog { width: 110; height: 90%; }
+.large-dialog VerticalScroll { height: 1fr; }
+.controls { height: auto; min-height: 3; }
+.controls Button { margin-right: 1; min-width: 8; padding: 0 1; }
+.error { height: auto; color: $error; }
+#proposal-meta { height: auto; margin-bottom: 1; }
+#source-meta { height: auto; max-height: 4; }
+.compact #top { height: 2; padding: 0 2; }
+.compact #main { padding: 0 1; }
+.compact #composer { height: 3; }
+.compact #composer-footer { height: 1; }
+.compact #send { height: 1; min-height: 1; border: none; }
+.compact #task-bar { height: 1; }
+.compact #task-bar Button { width: 10; min-width: 10; height: 1; min-height: 1; border: none; padding: 0 1; }

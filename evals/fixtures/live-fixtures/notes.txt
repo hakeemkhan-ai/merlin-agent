@@ -1,0 +1,5 @@
+first line
+second line
+third line
+REPLACE_ME
+same same

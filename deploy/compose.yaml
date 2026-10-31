@@ -1,0 +1,147 @@
+name: merlin
+x-app: &app
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  env_file: ${MERLIN_ENV_FILE:-../.env}
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 30s
+  read_only: true
+  tmpfs:
+    - /tmp:size=128m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: [ALL]
+  volumes:
+    - state:/data
+  secrets:
+    - source: github_key
+      target: github.pem
+  depends_on:
+    postgres:
+      condition: service_healthy
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: merlin
+      POSTGRES_USER: merlin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U merlin -d merlin"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    cpus: ${MERLIN_POSTGRES_CPUS:-2.0}
+    mem_limit: ${MERLIN_POSTGRES_MEMORY:-1g}
+    pids_limit: ${MERLIN_POSTGRES_PIDS:-256}
+  migrate:
+    <<: *app
+    restart: "no"
+    command: [alembic, upgrade, head]
+    cpus: ${MERLIN_MIGRATE_CPUS:-1.0}
+    mem_limit: ${MERLIN_MIGRATE_MEMORY:-512m}
+    pids_limit: ${MERLIN_MIGRATE_PIDS:-128}
+  api:
+    <<: *app
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    cpus: ${MERLIN_API_CPUS:-1.0}
+    mem_limit: ${MERLIN_API_MEMORY:-768m}
+    pids_limit: ${MERLIN_API_PIDS:-256}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+  worker:
+    <<: *app
+    command: [merlin-worker]
+    healthcheck:
+      test: [CMD, python, /app/worker_health.py]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    cpus: ${MERLIN_WORKER_CPUS:-2.0}
+    mem_limit: ${MERLIN_WORKER_MEMORY:-1536m}
+    pids_limit: ${MERLIN_WORKER_PIDS:-512}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+  edge:
+    image: caddy:2-alpine
+    environment:
+      MERLIN_HOSTNAME: ${MERLIN_HOSTNAME:?Set MERLIN_HOSTNAME}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    cpus: ${MERLIN_EDGE_CPUS:-0.5}
+    mem_limit: ${MERLIN_EDGE_MEMORY:-256m}
+    pids_limit: ${MERLIN_EDGE_PIDS:-128}
+  otel:
+    image: otel/opentelemetry-collector:0.120.0
+    command: [--config=/etc/otel.yaml]
+    volumes:
+      - ./otel.yaml:/etc/otel.yaml:ro
+    restart: unless-stopped
+    cpus: ${MERLIN_OTEL_CPUS:-0.5}
+    mem_limit: ${MERLIN_OTEL_MEMORY:-256m}
+    pids_limit: ${MERLIN_OTEL_PIDS:-128}
+  jaeger:
+    image: jaegertracing/all-in-one:1.65.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports: ["127.0.0.1:16686:16686"]
+    restart: unless-stopped
+    cpus: ${MERLIN_JAEGER_CPUS:-1.0}
+    mem_limit: ${MERLIN_JAEGER_MEMORY:-512m}
+    pids_limit: ${MERLIN_JAEGER_PIDS:-256}
+  prometheus:
+    image: prom/prometheus:v3.2.0
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - metrics:/prometheus
+    restart: unless-stopped
+    cpus: ${MERLIN_PROMETHEUS_CPUS:-1.0}
+    mem_limit: ${MERLIN_PROMETHEUS_MEMORY:-512m}
+    pids_limit: ${MERLIN_PROMETHEUS_PIDS:-256}
+  grafana:
+    image: grafana/grafana:11.6.0
+    ports: ["127.0.0.1:3000:3000"]
+    volumes:
+      - grafana:/var/lib/grafana
+      - ./grafana:/etc/grafana/provisioning:ro
+    restart: unless-stopped
+    cpus: ${MERLIN_GRAFANA_CPUS:-1.0}
+    mem_limit: ${MERLIN_GRAFANA_MEMORY:-512m}
+    pids_limit: ${MERLIN_GRAFANA_PIDS:-256}
+volumes:
+  database:
+  state:
+  metrics:
+  grafana:
+  caddy:
+secrets:
+  github_key:
+    file: ${GITHUB_PRIVATE_KEY_PATH:?Set GITHUB_PRIVATE_KEY_PATH}

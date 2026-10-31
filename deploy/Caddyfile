@@ -1,0 +1,4 @@
+{$MERLIN_HOSTNAME} {
+    respond /metrics 404
+    reverse_proxy api:8000
+}

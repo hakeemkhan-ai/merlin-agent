@@ -1,0 +1,49 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.9"
+          python-version: "3.13"
+          enable-cache: true
+      # A committed uv.lock is required: CI must not silently resolve new versions.
+      - run: uv sync --locked --dev
+      - run: uv run --no-sync pytest
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync ruff format --check .
+      - run: uv run --no-sync mypy src
+      - name: Run offline runtime and agent contract evaluations
+        run: uv run --no-sync python -m merlin.evaluation --offline --output .merlin/reports/offline.json
+      - name: Record synthetic runtime performance
+        run: uv run --no-sync python scripts/performance_bench.py --output .merlin/reports/performance.json
+      - run: uv build --no-sources
+      - name: Validate deployment configuration without resolving service secrets
+        env:
+          MERLIN_ENV_FILE: ../.env.example
+        run: docker compose --env-file .env.example -f deploy/compose.yaml config --no-env-resolution --quiet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/*
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evaluation-and-performance
+          path: .merlin/reports/*.json
+  runtime-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test PostgreSQL, HTTP, migration and worker crash recovery
+        run: python3 scripts/runtime_smoke.py

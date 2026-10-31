@@ -1,0 +1,250 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "edit-python-addition",
+      "category": "edits",
+      "description": "Repair a small Python arithmetic function and preserve unrelated files.",
+      "offline_tests": ["test_integration.IntegrationTests.test_end_to_end_edit_persists_events_checkpoints_and_result", "test_tools.FileToolTests.test_stale_replacement_and_write_rejected"],
+      "live_prompt": "Fix add in live-fixtures/calculator.py so it adds its two arguments. Preserve the signature and all unrelated files. Run the existing test_calculator.py tests inside the sandbox. Use the simple expression return left + right.",
+      "allow_changes": ["live-fixtures/calculator.py"],
+      "objectives": [
+        {"kind": "file_equals", "path": "live-fixtures/calculator.py", "expected": "def add(left: int, right: int) -> int:\n    return left + right\n"},
+        {"kind": "tool_output_contains", "tool": "bash", "expected": "OK"}
+      ]
+    },
+    {
+      "id": "edit-exact-replacement",
+      "category": "edits",
+      "description": "Replace one unique occurrence without changing repeated text.",
+      "offline_tests": ["test_tools.FileToolTests.test_exact_replacement_rejects_ambiguous_count"],
+      "live_prompt": "In live-fixtures/notes.txt replace the unique REPLACE_ME with DONE using replace_text. Preserve every other byte and unrelated file.",
+      "allow_changes": ["live-fixtures/notes.txt"],
+      "objectives": [
+        {"kind": "file_equals", "path": "live-fixtures/notes.txt", "expected": "first line\nsecond line\nthird line\nDONE\nsame same\n"},
+        {"kind": "tool_succeeded", "tool": "replace_text"}
+      ]
+    },
+    {
+      "id": "edit-stale-checksum",
+      "category": "edits",
+      "description": "Reject a write based on stale file contents.",
+      "offline_tests": ["test_tools.FileToolTests.test_stale_replacement_and_write_rejected"],
+      "live_unavailable_reason": "Requires a deterministic concurrent-writer controller; the live API does not expose one."
+    },
+    {
+      "id": "edit-create-file",
+      "category": "edits",
+      "description": "Create a nested file without replacing an existing file.",
+      "offline_tests": ["test_tools.FileToolTests.test_create_only_and_parent_directories"],
+      "live_prompt": "Create live-fixtures/generated/proof.txt containing exactly CREATED followed by a newline. Do not change other files.",
+      "allow_changes": ["live-fixtures/generated/proof.txt"],
+      "objectives": [{"kind": "file_equals", "path": "live-fixtures/generated/proof.txt", "expected": "CREATED\n"}]
+    },
+    {
+      "id": "edit-workspace-isolation",
+      "category": "edits",
+      "description": "Deny traversal, absolute, secret, and symlink paths.",
+      "offline_tests": ["test_tools.FileToolTests.test_parent_absolute_secret_and_symlink_paths_rejected", "test_sandbox.ArchiveTests.test_traversal_links_duplicates_and_secrets_rejected"],
+      "live_unavailable_reason": "Isolation needs a controlled outside-workspace sentinel; public task submission cannot safely provision one."
+    },
+    {
+      "id": "navigation-numbered-read",
+      "category": "navigation",
+      "description": "Read a bounded line range with a content checksum.",
+      "offline_tests": ["test_tools.FileToolTests.test_numbered_read_returns_checksum", "test_tools.FileToolTests.test_line_range_limits"],
+      "live_prompt": "Use read_file to inspect live-fixtures/notes.txt and create live-fixtures/read-proof.txt containing exactly its third line, third line, followed by a newline. Preserve other files.",
+      "allow_changes": ["live-fixtures/read-proof.txt"],
+      "objectives": [
+        {"kind": "file_equals", "path": "live-fixtures/read-proof.txt", "expected": "third line\n"},
+        {"kind": "tool_succeeded", "tool": "read_file"}
+      ]
+    },
+    {
+      "id": "navigation-python-definition",
+      "category": "navigation",
+      "description": "Find a Python function's source with the language server.",
+      "offline_tests": ["test_lsp.LanguageServerTests.test_server_receives_current_source_contents", "test_lsp.LanguageServerTests.test_tool_positions_are_one_based"],
+      "live_prompt": "Without modifying files, use lsp_definition on the add call in live-fixtures/test_calculator.py, line 8, column 26, to locate its definition in calculator.py. Report the location.",
+      "objectives": [
+        {"kind": "tool_data_equals", "tool": "lsp_definition", "key": ["supported"], "expected": true},
+        {"kind": "tool_output_contains", "tool": "lsp_definition", "expected": "calculator.py"}
+      ]
+    },
+    {
+      "id": "navigation-typescript-definition",
+      "category": "navigation",
+      "description": "Find a TypeScript symbol using its current source contents.",
+      "offline_tests": ["test_lsp.LanguageServerTests.test_framed_response_parsing", "test_lsp.LanguageServerTests.test_server_receives_current_source_contents"],
+      "live_prompt": "Without modifying files, use lsp_definition on increment in live-fixtures/math.ts, line 4, column 24. Report its definition.",
+      "objectives": [
+        {"kind": "tool_data_equals", "tool": "lsp_definition", "key": ["supported"], "expected": true},
+        {"kind": "tool_output_contains", "tool": "lsp_definition", "expected": "math.ts"}
+      ]
+    },
+    {
+      "id": "navigation-explicit-fallback",
+      "category": "navigation",
+      "description": "Explain unsupported language servers and retain text-search fallback.",
+      "offline_tests": ["test_lsp.LanguageServerTests.test_unsupported_language_has_explicit_fallback"],
+      "live_unavailable_reason": "The version-one fixture has no unsupported-language source; fallback behavior has an offline contract only."
+    },
+    {
+      "id": "browser-local-counter",
+      "category": "browser",
+      "description": "Exercise a local application's button and inspect its resulting text.",
+      "offline_tests": ["test_browser.BrowserPolicyTests.test_local_application_interactions_allowed"],
+      "live_prompt": "Start python3 -m http.server 8123 --bind 127.0.0.1 in live-fixtures/web as a background sandbox process. Open http://127.0.0.1:8123 with browser_open, click #increment exactly once with browser_click, and use browser_read to verify Count: 1. Do not modify source files.",
+      "objectives": [
+        {"kind": "tool_succeeded", "tool": "browser_open"},
+        {"kind": "tool_succeeded", "tool": "browser_click"},
+        {"kind": "tool_output_contains", "tool": "browser_read", "expected": "Count: 1"}
+      ]
+    },
+    {
+      "id": "browser-screenshot-artifact",
+      "category": "browser",
+      "description": "Capture a browser screenshot artifact from a sandbox-local application.",
+      "offline_tests": ["test_api.APITests.test_artifacts_must_be_recorded_and_inside_artifact_directory"],
+      "live_prompt": "Start python3 -m http.server 8123 --bind 127.0.0.1 in live-fixtures/web as a background sandbox process. Open http://127.0.0.1:8123 using browser_open and capture browser_screenshot. Preserve source files.",
+      "objectives": [
+        {"kind": "tool_output_contains", "tool": "browser_open", "expected": "Merlin fixture"},
+        {"kind": "artifact_png", "tool": "browser_screenshot"}
+      ]
+    },
+    {
+      "id": "browser-external-policy",
+      "category": "browser",
+      "description": "Deny external writes and model-supplied destination policies.",
+      "offline_tests": ["test_browser.BrowserPolicyTests.test_external_click_denied_before_interaction", "test_browser.BrowserPolicyTests.test_route_aborts_unapproved_network_requests", "test_browser.BrowserPolicyTests.test_model_cannot_supply_domain_policy"],
+      "live_unavailable_reason": "An instrumented external endpoint is needed to prove no request escaped; no endpoint is provisioned by this runner."
+    },
+    {
+      "id": "context-scoped-instructions",
+      "category": "context",
+      "description": "Load subtree instructions when the task touches that subtree.",
+      "offline_tests": ["test_context.ContextTests.test_nested_instructions_apply_only_to_touched_subtrees"],
+      "live_prompt": "Read live-fixtures/notes.txt. Then prove instruction loading as directed by the applicable MERLIN.md inside live-fixtures. Do not modify unrelated files.",
+      "allow_changes": ["live-fixtures/instruction-proof.txt"],
+      "objectives": [{"kind": "file_equals", "path": "live-fixtures/instruction-proof.txt", "expected": "MERLIN_INSTRUCTION_APPLIED\n"}]
+    },
+    {
+      "id": "context-session-history",
+      "category": "context",
+      "description": "Preserve previous session constraints and checkpoint references.",
+      "offline_tests": ["test_context.ContextTests.test_previous_session_prompts_and_results_are_referenced", "test_persistence.PersistenceTests.test_checkpoint_can_seed_child_and_same_session_followup"],
+      "live_unavailable_reason": "Requires a multi-submission session protocol; version one submits independent fixture tasks only."
+    },
+    {
+      "id": "context-native-compaction",
+      "category": "context",
+      "description": "Keep native provider signatures and incomplete-call invariants during compaction.",
+      "offline_tests": ["test_context.ContextTests.test_compaction_preserves_prompt_and_native_signed_blocks", "test_context.ContextTests.test_incomplete_interaction_cannot_be_compacted", "test_gemini.GeminiTests.test_native_signatures_and_function_ids_survive"],
+      "live_unavailable_reason": "A bounded deterministic long-history injector and signed-provider replay are not exposed by the public live API."
+    },
+    {
+      "id": "delegation-integrate-child",
+      "category": "delegation",
+      "description": "Spawn a scoped child and integrate its source changes into the parent.",
+      "offline_tests": ["test_delegation.DelegationTests.test_spawn_is_idempotent_scoped_and_least_privileged", "test_delegation.DelegationTests.test_merge_contains_only_source_changes_and_stale_hashes"],
+      "live_prompt": "Delegate to one child with spawn_child: change only live-fixtures/settings.json to the JSON object {\"mode\":\"ready\",\"enabled\":true}. Await the child and integrate its changes with integrate_child. Preserve all unrelated files.",
+      "allow_changes": ["live-fixtures/settings.json"],
+      "objectives": [
+        {"kind": "json_equals", "path": "live-fixtures/settings.json", "expected": {"mode": "ready", "enabled": true}},
+        {"kind": "child_integrated"}
+      ]
+    },
+    {
+      "id": "delegation-conflict-abort",
+      "category": "delegation",
+      "description": "Abort all changes when a child delta conflicts with the parent's current source.",
+      "offline_tests": ["test_tools.DeltaTests.test_conflict_aborts_all_changes", "test_delegation.DelegationTests.test_merge_contains_only_source_changes_and_stale_hashes"],
+      "live_unavailable_reason": "A deterministic parent/child interleaving controller is required for reproducible conflict injection."
+    },
+    {
+      "id": "delegation-cancellation",
+      "category": "delegation",
+      "description": "Reject a stale parent's attempt to create more work after cancellation.",
+      "offline_tests": ["test_delegation.DelegationTests.test_stale_parent_cannot_spawn_after_cancel", "test_persistence.PersistenceTests.test_delegation_creation_rejects_stale_lease_even_for_idempotent_retry"],
+      "live_unavailable_reason": "Requires worker lease instrumentation unavailable to this fixture-only runner."
+    },
+    {
+      "id": "recovery-checkpoint-restore",
+      "category": "recovery",
+      "description": "Restore a vanished sandbox from a durable checkpoint with verified source and Git bytes.",
+      "offline_tests": ["test_worker.WorkerTests.test_missing_sandbox_restores_checkpoint", "test_sandbox.SandboxTests.test_checkpoint_restores_source_and_git_data", "test_sandbox.SandboxTests.test_restore_rejects_tampered_artifact"],
+      "live_unavailable_reason": "Sandbox destruction and worker restart need an operator-controlled fault injector; task success cannot establish recovery."
+    },
+    {
+      "id": "recovery-prepared-uncertainty",
+      "category": "recovery",
+      "description": "Pause interrupted prepared operations without replaying unknown effects.",
+      "offline_tests": ["test_worker.WorkerTests.test_reclaimed_prepared_invocation_is_not_replayed", "test_persistence.PersistenceTests.test_uncertain_result_is_not_success"],
+      "live_unavailable_reason": "No public endpoint injects the precise prepared-operation crash boundary."
+    },
+    {
+      "id": "recovery-completed-once",
+      "category": "recovery",
+      "description": "Reuse a completed invocation when history persistence was interrupted.",
+      "offline_tests": ["test_worker.WorkerTests.test_completed_invocation_missing_history_is_not_executed_twice", "test_persistence.PersistenceTests.test_tool_result_and_checkpoint_commit_atomically"],
+      "live_unavailable_reason": "Requires a database/history fault injector and independent effect counter."
+    },
+    {
+      "id": "recovery-cancel-worker",
+      "category": "recovery",
+      "description": "Interrupt active work, clean up its workspace, and fence stale success writes.",
+      "offline_tests": ["test_worker.WorkerTests.test_cancellation_interrupts_model_and_cleans_workspace", "test_worker.WorkerTests.test_stale_worker_stops_without_persisting_success"],
+      "live_unavailable_reason": "A controllable in-flight model and sandbox lifecycle observer are needed to grade cleanup rather than just terminal state."
+    },
+    {
+      "id": "github-repository-read",
+      "category": "github",
+      "description": "Read metadata for the task's exact GitHub repository.",
+      "offline_tests": ["test_github.GitHubTests.test_read_has_fixed_paths_and_no_credential_disclosure", "test_github.GitHubTests.test_clone_token_is_read_only_and_single_repository"],
+      "live_prompt": "Use github_read with resource repository to inspect this fixture repository. Report its full_name. Do not publish or modify files.",
+      "objectives": [{"kind": "tool_data_equals", "tool": "github_read", "key": ["resource", "full_name"], "expected": "$repository"}]
+    },
+    {
+      "id": "github-publishing-authorization",
+      "category": "github",
+      "description": "Enforce owner publishing grants and deny child publishing server-side.",
+      "offline_tests": ["test_agent.ExecutorTests.test_unapproved_publishing_never_reaches_publisher", "test_agent.ExecutorTests.test_children_cannot_publish_even_with_inherited_permissions", "test_github.GitHubTests.test_unapproved_and_child_writes_do_not_mint_tokens"],
+      "live_unavailable_reason": "No publishing permission is granted by this runner; safe negative proof needs an independently instrumented publisher."
+    },
+    {
+      "id": "github-issue-reconciliation",
+      "category": "github",
+      "description": "Reconcile a lost issue response without creating duplicate issues.",
+      "offline_tests": ["test_github.GitHubTests.test_lost_issue_response_reconciles_without_duplicate", "test_github.GitHubTests.test_unresolved_issue_is_never_reposted", "test_integration.IntegrationTests.test_reviewed_github_call_resumes_and_executes_once"],
+      "live_unavailable_reason": "Requires explicit publishing authorization, a dedicated issue sink, and a response-loss injector; none is configured."
+    },
+    {
+      "id": "github-restricted-branch",
+      "category": "github",
+      "description": "Publish only the fixed task branch without force updates or unsafe paths.",
+      "offline_tests": ["test_github.GitHubTests.test_fixed_task_branch_and_non_force_update", "test_github.GitHubTests.test_publishing_rejects_paths_modes_and_argument_expansion", "test_github.GitHubTests.test_published_branch_reconciliation_does_not_create_more_objects"],
+      "live_unavailable_reason": "Remote branch creation is intentionally unconfigured; a live trial needs explicit publishing authority and independently inspected Git refs."
+    },
+    {
+      "id": "runtime-worker-presence",
+      "category": "recovery",
+      "description": "Require a fresh marker from this worker process and migrated database metadata for container health.",
+      "offline_tests": ["test_deployment.DeploymentTests.test_worker_health_requires_its_own_fresh_presence", "test_deployment.DeploymentTests.test_worker_health_checks_database_metadata_without_loading_tasks", "test_deployment.DeploymentTests.test_worker_health_fails_closed_on_database_and_schema_errors"],
+      "live_unavailable_reason": "The public fixture task API cannot control host worker process health; this contract uses trusted metadata fixtures, with real process restart checked separately by the runtime smoke."
+    },
+    {
+      "id": "runtime-smoke-driver-isolation",
+      "category": "recovery",
+      "description": "Keep runtime smoke operations in a unique disposable project and require readiness before task verification.",
+      "offline_tests": ["test_runtime_smoke.RuntimeSmokeTests.test_failed_checks_remove_only_the_unique_test_project", "test_runtime_smoke.RuntimeSmokeTests.test_full_sequence_crashes_worker_then_verifies_recovery_without_secret_output", "test_runtime_smoke.RuntimeSmokeTests.test_unavailable_daemon_never_starts_or_removes_resources"],
+      "live_unavailable_reason": "These assertions check the smoke driver with a fake command runner. Real PostgreSQL, Docker process startup and crash recovery are graded by scripts/runtime_smoke.py, never by these offline results."
+    },
+    {
+      "id": "github-pr-reconciliation",
+      "category": "github",
+      "description": "Create a PR from the authorized task branch and reconcile its durable marker.",
+      "offline_tests": ["test_github.GitHubTests.test_pr_uses_task_branch_and_reconciles_marker"],
+      "live_unavailable_reason": "Remote PR creation is unconfigured and would require explicit authority plus independent PR and branch checks."
+    }
+  ]
+}

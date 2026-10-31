@@ -1,0 +1,86 @@
+# Local-only runtime validation. No cloud keys, production .env, host ports, or App secrets.
+name: merlin-smoke
+x-runtime: &runtime
+  image: merlin-smoke-runtime:${MERLIN_SMOKE_TAG:?Use scripts/runtime_smoke.py}
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+    target: runtime
+  environment: &environment
+    MERLIN_DATABASE_URL: postgresql+psycopg://merlin:${MERLIN_SMOKE_PASSWORD:?Use scripts/runtime_smoke.py}@postgres:5432/merlin_test_runtime
+    MERLIN_OWNER_TOKEN: ${MERLIN_SMOKE_OWNER_TOKEN:?Use scripts/runtime_smoke.py}
+    MERLIN_API_URL: http://api:8000
+    MERLIN_ARTIFACT_DIR: /data/artifacts
+    MERLIN_PROBE_DIR: /data/probe
+    MERLIN_OTLP_ENDPOINT: ""
+  read_only: true
+  init: true
+  stop_grace_period: 10s
+  cpus: 2.0
+  mem_limit: 1g
+  pids_limit: 256
+  tmpfs:
+    - /tmp:size=128m,mode=1777
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  volumes:
+    - state:/data
+  depends_on:
+    postgres:
+      condition: service_healthy
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: merlin_test_runtime
+      POSTGRES_USER: merlin
+      POSTGRES_PASSWORD: ${MERLIN_SMOKE_PASSWORD:?Use scripts/runtime_smoke.py}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U merlin -d merlin_test_runtime"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    cpus: 2.0
+    mem_limit: 1g
+    pids_limit: 256
+  migrate:
+    <<: *runtime
+    command: [alembic, upgrade, head]
+  api:
+    <<: *runtime
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz', timeout=3)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  worker:
+    <<: *runtime
+    command: [python, /checks/runtime_probe.py, worker]
+    healthcheck:
+      test: [CMD, python, /app/worker_health.py]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    volumes:
+      - state:/data
+      - ../tests:/checks:ro
+  checks:
+    <<: *runtime
+    image: merlin-smoke-checks:${MERLIN_SMOKE_TAG:?Use scripts/runtime_smoke.py}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: verification
+    environment:
+      <<: *environment
+      MERLIN_POSTGRES_TESTS: "1"
+      MERLIN_TEST_POSTGRES_URL: postgresql+psycopg://merlin:${MERLIN_SMOKE_PASSWORD:?Use scripts/runtime_smoke.py}@postgres:5432/merlin_test_runtime
+    volumes:
+      - state:/data
+      - ../tests:/checks:ro
+volumes:
+  database:
+  state:
