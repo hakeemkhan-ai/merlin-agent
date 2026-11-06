@@ -118,7 +118,7 @@ services:
     mem_limit: ${MERLIN_JAEGER_MEMORY:-512m}
     pids_limit: ${MERLIN_JAEGER_PIDS:-256}
   prometheus:
-    image: prom/prometheus:v3.2.0
+    image: prom/prometheus:v3.13.5
     volumes:
       - ./prometheus.yaml:/etc/prometheus/prometheus.yml:ro
       - metrics:/prometheus
@@ -127,7 +127,7 @@ services:
     mem_limit: ${MERLIN_PROMETHEUS_MEMORY:-512m}
     pids_limit: ${MERLIN_PROMETHEUS_PIDS:-256}
   grafana:
-    image: grafana/grafana:11.6.0
+    image: grafana/grafana:12.4.14
     ports: ["127.0.0.1:3000:3000"]
     volumes:
       - grafana:/var/lib/grafana

@@ -81,6 +81,26 @@ def test_controls_and_direction_overrides_cannot_escape_rendering():
     assert validate_connection("http://localhost:8000/") == "http://localhost:8000"
 
 
+def test_operator_resolution_clears_uncertain_tool_without_marking_success():
+    state = feed()
+    state.apply(event(1, "tool.started", {"call": {"id": "call", "name": "bash"}}))
+    state.apply(
+        event(
+            2,
+            "tool.finished",
+            {"call_id": "call", "ok": False, "uncertain": True, "result": {"output": "Lost reply"}},
+        )
+    )
+    assert state.tools["call"].status == "uncertain"
+    resolution = event(
+        3, "tool.operator_resolved", {"call_id": "call", "note": "Inspected external effects"}
+    )
+    assert state.apply(resolution)
+    assert state.tools["call"].status == "resolved"
+    assert "Inspected external effects" in state.tools["call"].text
+    assert not state.apply(resolution)
+
+
 def test_ui_preferences_validate_types_and_never_store_tokens_or_drafts(tmp_path, monkeypatch):
     from merlin.tui.preferences import load_preferences, save_preferences
 

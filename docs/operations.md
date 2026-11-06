@@ -416,6 +416,20 @@ services. Monitor failed/paused tasks, task transitions, errors, tokens, databas
 and state disk use, and backups. Protect logs and keep prompts and credentials out
 of operational annotations.
 
+The November 2026 security update pins Grafana to 12.4.14 and Prometheus to
+3.13.5 (the supported LTS line). The previous 11.6.0/3.2.0 images fall within
+published vulnerability ranges; see [the review](audit-2026-11-06.md).
+Before rolling out the Grafana major-version upgrade, back up its named volume
+and review the [Grafana 12 upgrade guide](https://grafana.com/docs/grafana/latest/upgrade-guide/upgrade-v12/upgrade-v12.0/).
+Validate dashboard/data-source provisioning and scrape targets after startup.
+An image downgrade needs a matching volume backup if Grafana has migrated its
+database. Application schema migrations are unchanged by this security update.
+
+When more than one tool outcome is uncertain, resolve each operation after
+inspection. The task stays paused until the last unresolved outcome is
+acknowledged, then queues automatically. The terminal labels acknowledged
+operations as resolved without treating them as successful executions.
+
 ## Verification gates
 
 Publishing source now starts with `github_prepare_publish(paths, message)`. It

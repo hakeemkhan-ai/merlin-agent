@@ -113,6 +113,17 @@ class TaskFeed:
                 else ("passed" if data.get("ok", result.get("ok", True)) else "failed")
             )
             entry.finished_at = timestamp
+        elif kind == "tool.operator_resolved":
+            entry = self.tools.get(data.get("call_id", ""))
+            if entry is not None:
+                entry.status = "resolved"
+                entry.text = (
+                    "Operator acknowledged uncertain outcome: "
+                    + str(data.get("note", ""))
+                    + "\n"
+                    + entry.text
+                )[:64000]
+            self.progress = "Uncertain operation acknowledged"
         elif kind == "approval.requested":
             self.task["state"] = "waiting_for_approval"
             self.progress = "Publishing proposal needs review"

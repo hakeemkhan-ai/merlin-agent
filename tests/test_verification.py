@@ -2,10 +2,14 @@ import importlib.util
 import io
 import os
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
+
+from scripts import e2b_verify
 
 spec = importlib.util.spec_from_file_location(
     "merlin_verification", Path(__file__).resolve().parents[1] / "scripts" / "verify.py"
@@ -15,6 +19,39 @@ spec.loader.exec_module(verification)
 
 
 class VerificationTests(unittest.TestCase):
+    def test_source_snapshot_excludes_credentials_and_special_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            private_paths = [
+                ".ssh/id_rsa",
+                ".kube/config",
+                ".netrc",
+                ".git-credentials",
+                "nested/credentials/token.json",
+                "nested/SECRETS/token.json",
+                "nested/ID_ED25519",
+                "nested/certificate.p12",
+                "nested/certificate.PFX",
+                "nested/.env.production",
+            ]
+            for name in private_paths:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("synthetic-credential-must-not-transfer")
+            (root / "source.py").write_text("pass\n")
+            (root / ".env.example").write_text("EXAMPLE=placeholder\n")
+            (root / "link").symlink_to(root / ".netrc")
+            os.mkfifo(root / "pipe")
+            with patch.object(e2b_verify, "ROOT", root):
+                data = e2b_verify.snapshot()
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+                members = archive.getmembers()
+                self.assertEqual(
+                    {member.name for member in members if member.isfile()},
+                    {"source.py", ".env.example"},
+                )
+                self.assertTrue(all(member.isdir() or member.isfile() for member in members))
+
     def test_failed_resolution_stops_before_install_or_validation(self):
         calls = []
 

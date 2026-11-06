@@ -43,20 +43,49 @@ EXCLUDED = {
     "artifacts",
     "backups",
     "secrets",
+    "credentials",
+    ".ssh",
+    ".kube",
+    ".npmrc",
+    ".pypirc",
+    ".netrc",
+    ".git-credentials",
+    "id_rsa",
+    "id_ed25519",
+    "id_ecdsa",
+    "id_dsa",
+}
+EXCLUDED_SUFFIXES = {
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    ".crt",
+    ".db",
+    ".sqlite",
+    ".sqlite3",
+    ".pyc",
+    ".log",
 }
 
 
 def snapshot() -> bytes:
     def allowed(member: tarfile.TarInfo) -> tarfile.TarInfo | None:
         path = Path(member.name)
-        if member.issym() or member.islnk() or any(part in EXCLUDED for part in path.parts):
+        if not (member.isdir() or member.isfile()):
             return None
-        if path.name.startswith(".env") and path.name != ".env.example":
-            return None
-        if path.suffix in {".pem", ".key", ".db", ".pyc"} or any(
-            part.endswith(".egg-info") for part in path.parts
-        ):
-            return None
+        # Infrastructure-only: do not import application code on the control host.
+        # Check every component so nested credentials and case variants are excluded.
+        for part in path.parts:
+            name = part.casefold()
+            if (
+                name in EXCLUDED
+                or Path(name).suffix in EXCLUDED_SUFFIXES
+                or name.endswith(".egg-info")
+                or name.startswith(".env")
+                and name != ".env.example"
+            ):
+                return None
         return member
 
     data = io.BytesIO()

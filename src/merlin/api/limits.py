@@ -3,22 +3,46 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 
 class RequestLimits:
-    def __init__(self, app: ASGIApp, max_body_bytes: int = 1048576, max_streams: int = 32) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        max_body_bytes: int = 1048576,
+        max_streams: int = 32,
+        *,
+        owner_token: str | None = None,
+    ) -> None:
         self.app = app
         self.max_body_bytes = max_body_bytes
         self.max_streams = max_streams
         self.streams = 0
+        self.authorization = f"Bearer {owner_token}".encode() if owner_token is not None else None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        path = scope.get("path", "")
+        public_callback = scope.get("method") == "GET" and path == "/v1/github/callback"
+        if self.authorization is not None and path.startswith("/v1/") and not public_callback:
+            # FastAPI resolves body parameters before route dependencies. Reject
+            # unauthorized clients before buffering uploads or parsing JSON.
+            supplied = [
+                value for name, value in scope.get("headers", []) if name == b"authorization"
+            ]
+            if len(supplied) != 1 or not hmac.compare_digest(supplied[0], self.authorization):
+                await JSONResponse(
+                    {"detail": "Owner authentication required"},
+                    401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )(scope, receive, send)
+                return
         if scope.get("method") in {"POST", "PUT", "PATCH"}:
             headers = dict(scope.get("headers", []))
             try:

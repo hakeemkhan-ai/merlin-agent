@@ -21,7 +21,16 @@ from merlin.api import create_app
 from merlin.api.limits import RequestLimits
 from merlin.api.views import SnapshotCache
 from merlin.config import Settings
-from merlin.contracts import Budget, Checkpoint, StaleLease, TaskSpec, TaskState, now
+from merlin.contracts import (
+    Budget,
+    Checkpoint,
+    StaleLease,
+    TaskSpec,
+    TaskState,
+    ToolCall,
+    ToolResult,
+    now,
+)
 from merlin.persistence import SQLTaskStore
 from merlin.sandbox._remote import MANIFEST, validate_archive
 
@@ -159,6 +168,55 @@ def test_bounded_events_preserve_full_order_and_make_large_event_progress(
         values.extend(page)
         cursor = page[-1].sequence
     assert [value.sequence for value in values] == list(range(1, 13))
+
+
+@pytest.mark.parametrize("unfinished_mutation", [False, True])
+def test_resolving_multiple_uncertain_tools_only_requeues_after_the_last_resolution(
+    store: SQLTaskStore, unfinished_mutation: bool
+) -> None:
+    task = store.create_task(TaskSpec(prompt="inspect", repository="owner/repo"))
+    lease = store.claim("worker")
+    assert lease is not None
+    calls = [
+        ToolCall(name="read_file"),
+        ToolCall(name="bash" if unfinished_mutation else "read_file"),
+    ]
+    for index, call in enumerate(calls):
+        store.begin_tool(lease, call)
+        if index == 0 or not unfinished_mutation:
+            store.finish_tool(lease, ToolResult(call_id=call.id, ok=False, uncertain=True))
+    store.update_task(lease, state=TaskState.PAUSED)
+
+    first = store.resolve_tool(task.id, calls[0].id, "Inspected first operation")
+    assert first.state == TaskState.PAUSED
+    assert store.claim("unexpected-worker") is None
+    with pytest.raises(ValueError, match="Uncertain"):
+        store.resume(task.id)
+
+    last = store.resolve_tool(task.id, calls[1].id, "Inspected second operation")
+    assert last.state == TaskState.QUEUED
+    assert store.claim("next-worker") is not None
+
+
+def test_resolution_allows_an_unfinished_safely_replayable_read(store: SQLTaskStore) -> None:
+    task = store.create_task(TaskSpec(prompt="inspect", repository="owner/repo"))
+    lease = store.claim("worker")
+    assert lease is not None
+    interrupted_read = ToolCall(name="read_file")
+    uncertain_write = ToolCall(name="write_file")
+    store.begin_tool(lease, interrupted_read)
+    store.begin_tool(lease, uncertain_write)
+    store.finish_tool(lease, ToolResult(call_id=uncertain_write.id, ok=False, uncertain=True))
+    store.update_task(lease, state=TaskState.PAUSED)
+
+    resolved = store.resolve_tool(task.id, uncertain_write.id, "Inspected write effects")
+    assert resolved.state == TaskState.QUEUED
+    assert (
+        next(
+            item for item in store.invocations(task.id) if item.call.id == interrupted_read.id
+        ).result
+        is None
+    )
 
 
 def test_usage_refunds_only_proven_undispatched_requests(store: SQLTaskStore) -> None:

@@ -135,6 +135,57 @@ class APITests(TestCase):
         with self.assertRaises(ValueError):
             create_app(Settings(owner_token=SecretStr("short")), self.store)
 
+    def test_unauthorized_requests_are_rejected_before_reading_the_body(self) -> None:
+        async def execute(method, headers):
+            messages = []
+
+            async def receive():
+                self.fail("Unauthorized request body was read")
+
+            async def send(message):
+                messages.append(message)
+
+            await self.client.app(
+                {
+                    "type": "http",
+                    "http_version": "1.1",
+                    "method": method,
+                    "scheme": "http",
+                    "path": "/v1/tasks",
+                    "raw_path": b"/v1/tasks",
+                    "query_string": b"",
+                    "headers": headers,
+                    "client": ("127.0.0.1", 12345),
+                    "server": ("test", 80),
+                },
+                receive,
+                send,
+            )
+            start = next(
+                message for message in messages if message["type"] == "http.response.start"
+            )
+            self.assertEqual(start["status"], 401)
+            self.assertIn((b"www-authenticate", b"Bearer"), start["headers"])
+
+        for method in ("POST", "PUT", "PATCH"):
+            valid = (b"authorization", f"Bearer {TOKEN}".encode())
+            invalid = (b"authorization", b"Bearer wrong")
+            for authorization in (
+                [],
+                [invalid],
+                [valid, valid],
+                [valid, invalid],
+                [invalid, valid],
+            ):
+                with self.subTest(method=method, authorization=authorization):
+                    asyncio.run(execute(method, authorization))
+
+    def test_unauthorized_malformed_json_does_not_return_validation_details(self) -> None:
+        response = self.client.post(
+            "/v1/tasks", content=b"{invalid", headers={"Content-Type": "application/json"}
+        )
+        self.assertEqual(response.status_code, 401)
+
     def test_task_creation_and_inspection(self) -> None:
         response = self.submit(permissions=["create_pr"], allowed_domains=["Docs.Example.com."])
         self.assertEqual(response.status_code, 201, response.text)

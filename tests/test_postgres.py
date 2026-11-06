@@ -138,6 +138,28 @@ class PostgreSQLTests(unittest.TestCase):
         self.assertEqual(sorted(outcomes), ["created", "rejected"])
         self.assertEqual(len(self.first.list_tasks("repository-race")), 1)
 
+    def test_uncertain_resolutions_stay_paused_across_independent_connections(self) -> None:
+        task = self.first.create_task(TaskSpec(prompt="Inspect", repository="owner/repo"))
+        lease = self.first.claim("worker")
+        assert lease is not None
+        calls = [ToolCall(name="read_file"), ToolCall(name="bash")]
+        for call in calls:
+            self.first.begin_tool(lease, call)
+            self.first.finish_tool(lease, ToolResult(call_id=call.id, ok=False, uncertain=True))
+        self.first.update_task(lease, state=TaskState.PAUSED)
+
+        resolved = self.first.resolve_tool(task.id, calls[0].id, "Inspected read outcome")
+        self.assertEqual(resolved.state, TaskState.PAUSED)
+        self.assertEqual(self.second.get_task(task.id).state, TaskState.PAUSED)
+        self.assertIsNone(self.second.claim("blocked-worker"))
+        with self.assertRaises(ValueError):
+            self.second.resume(task.id)
+
+        resolved = self.second.resolve_tool(task.id, calls[1].id, "Inspected external effects")
+        self.assertEqual(resolved.state, TaskState.QUEUED)
+        self.assertEqual(self.first.get_task(task.id).state, TaskState.QUEUED)
+        self.assertIsNotNone(self.first.claim("next-worker"))
+
     def test_session_gate_serializes_followups_while_other_sessions_progress(self) -> None:
         same_session = [
             self.first.create_task(

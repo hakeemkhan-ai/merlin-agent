@@ -1636,6 +1636,19 @@ class SQLTaskStore:
                 self._event(session, row, "task.cancel_requested", {"state": row.state})
             return self._task(task)
 
+    @staticmethod
+    def _has_uncertain_tools(session: Session, task_id: str) -> bool:
+        from merlin.agent import SAFE_REPLAY_TOOLS
+
+        invocations = session.scalars(select(InvocationRow).where(InvocationRow.task_id == task_id))
+        return any(
+            invocation.result is not None
+            and invocation.result.get("uncertain")
+            or invocation.result is None
+            and invocation.call["name"] not in SAFE_REPLAY_TOOLS
+            for invocation in invocations
+        )
+
     def resume(self, task_id: str) -> Task:
         with self._write() as session:
             row = self._row(session, task_id, lock=True)
@@ -1643,18 +1656,7 @@ class SQLTaskStore:
                 raise ValueError("Only paused tasks can be resumed")
             if row.cancel_requested:
                 raise ValueError("Cancelled task cannot be resumed")
-            from merlin.agent import SAFE_REPLAY_TOOLS
-
-            invocations = session.scalars(
-                select(InvocationRow).where(InvocationRow.task_id == task_id)
-            )
-            if any(
-                invocation.result is not None
-                and invocation.result.get("uncertain")
-                or invocation.result is None
-                and invocation.call["name"] not in SAFE_REPLAY_TOOLS
-                for invocation in invocations
-            ):
+            if self._has_uncertain_tools(session, task_id):
                 raise ValueError("Uncertain tool outcomes must be inspected and resolved first")
             row.state = TaskState.QUEUED.value
             row.worker_id = None
@@ -1698,8 +1700,13 @@ class SQLTaskStore:
                     if isinstance(response, dict) and response.get("id") == call_id:
                         response["response"] = result.model_dump(mode="json")
             task.history = history
-            task.state = TaskState.QUEUED.value
-            task.error = None
+            unresolved = self._has_uncertain_tools(session, task_id)
+            task.state = TaskState.PAUSED.value if unresolved else TaskState.QUEUED.value
+            task.error = (
+                "Other uncertain tool outcomes must be inspected and resolved first"
+                if unresolved
+                else None
+            )
             task.worker_id = None
             task.lease_until = None
             # Acknowledgement restores the completed filesystem snapshot in a

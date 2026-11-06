@@ -124,6 +124,7 @@ def create_app(
 
     app.add_middleware(
         RequestLimits,
+        owner_token=owner_token,
         max_body_bytes=getattr(settings, "max_request_bytes", 1048576),
         max_streams=getattr(settings, "max_event_streams", 32),
     )

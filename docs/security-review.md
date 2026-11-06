@@ -1,5 +1,13 @@
 # Independent implementation review
 
+## 2026-11-06 review
+
+The [security, quality, and bug review](audit-2026-11-06.md) records fixes for
+credential exclusions during verification uploads, authentication before request
+body processing, multi-operation uncertainty resolution, terminal resolution
+state, and vulnerable monitoring image pins. It includes regression evidence,
+the Python dependency audit, and the remaining deployment verification limits.
+
 ## 2026-10-29 audit
 
 The subsequent ECC audit's [prioritized findings and execution evidence](audit-2026-10-29.md)
