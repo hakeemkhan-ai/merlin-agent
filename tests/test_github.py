@@ -289,6 +289,50 @@ class GitHubTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.ok, result.output)
         self.assertEqual(result.data["branch"], "merlin/task-task123")
 
+    async def test_first_publish_requires_default_branch_ancestry(self) -> None:
+        checkpoint, store = self.frozen_snapshot({"guide.md": b"A small change\n"})
+        call = ToolCall(
+            name="github_publish_branch",
+            arguments={
+                "base_sha": BASE_SHA,
+                "message": "Update guide",
+                "paths": ["guide.md"],
+                "checkpoint_id": checkpoint.id,
+                "checkpoint_sha256": checkpoint.sha256,
+            },
+        )
+        for status in ("diverged", "ahead", "at-head"):
+            with self.subTest(status=status):
+                requests: list[str] = []
+
+                async def handler(
+                    request: httpx.Request, status: str = status, requests: list[str] = requests
+                ) -> httpx.Response:
+                    path = request.url.path.removeprefix("/repos/owner/repo")
+                    requests.append(path)
+                    if path == "/git/ref/heads/merlin/task-task123":
+                        return httpx.Response(404)
+                    if path == "/git/ref/heads/main":
+                        head = BASE_SHA if status == "at-head" else NEW_SHA
+                        return httpx.Response(200, json={"object": {"sha": head}})
+                    if path == f"/compare/{BASE_SHA}...{NEW_SHA}":
+                        return httpx.Response(
+                            200, json={"status": status, "merge_base_commit": {"sha": BASE_SHA}}
+                        )
+                    if path == f"/git/commits/{BASE_SHA}":
+                        return httpx.Response(200, json={"tree": {"sha": "c" * 40}})
+                    if path in {"/git/blobs", "/git/trees", "/git/commits", "/git/refs"}:
+                        return httpx.Response(201, json={"sha": NEW_SHA})
+                    return await self.handler(request)
+
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+                    result = await FakeGitHubService(self.settings, http, store=store).execute(
+                        self.task(["publish_branch"]), call
+                    )
+                self.assertEqual(result.ok, status != "diverged", result.output)
+                self.assertEqual("/git/blobs" in requests, result.ok)
+                self.assertEqual("/git/refs" in requests, result.ok)
+
     async def test_read_has_fixed_paths_and_no_credential_disclosure(self) -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(self.handler)) as http:
             service = FakeGitHubService(self.settings, http)
@@ -345,6 +389,8 @@ class GitHubTests(unittest.IsolatedAsyncioTestCase):
                 await second.connection_callback("code", state)
             with self.assertRaises(ValueError):
                 await second.connection_callback("code", state + "forged")
+            with self.assertRaises(ValueError):
+                await second.connection_callback("code", state[:-1] + "é")
             self.assertEqual(len(self.requests), 4)
         state_content = "".join(
             path.read_text() for path in Path(self.temporary.name).rglob("*.json")

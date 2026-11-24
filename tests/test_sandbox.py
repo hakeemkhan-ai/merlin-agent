@@ -10,8 +10,11 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -31,6 +34,14 @@ from merlin.sandbox import E2BSandboxClient, network_configuration
 from merlin.sandbox._remote import MANIFEST, capture, digest, validate_archive
 
 
+@asynccontextmanager
+async def stream_file(data: bytes) -> AsyncIterator[AsyncIterator[bytes]]:
+    async def chunks() -> AsyncIterator[bytes]:
+        yield data
+
+    yield chunks()
+
+
 class FakeFiles:
     def __init__(self, folder: Path) -> None:
         self.folder = folder
@@ -42,8 +53,10 @@ class FakeFiles:
     async def write(self, name: str, content: bytes | str) -> None:
         self.local(name).write_bytes(content.encode() if isinstance(content, str) else content)
 
-    async def read(self, name: str, format: str = "text") -> bytes | str:
+    async def read(self, name: str, format: str = "text") -> Any:
         data = self.local(name).read_bytes()
+        if format == "stream":
+            return stream_file(data)
         return data if format == "bytes" else data.decode()
 
     async def remove(self, name: str) -> None:
@@ -273,7 +286,9 @@ class SandboxTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_checkpoint_archive_is_not_retried(self) -> None:
         workspace = await self.client.create(self.task)
         with (
-            patch.object(self.sdk.files, "read", return_value=b"not an archive") as read,
+            patch.object(
+                self.sdk.files, "read", return_value=stream_file(b"not an archive")
+            ) as read,
             patch("merlin.sandbox.asyncio.sleep", new_callable=AsyncMock) as sleep,
             self.assertRaisesRegex(WorkspaceSetupError, "archive validation failed") as caught,
         ):
@@ -281,6 +296,57 @@ class SandboxTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(read.await_count, 1)
         self.assertIsInstance(caught.exception.__cause__, tarfile.ReadError)
         sleep.assert_not_awaited()
+
+    async def test_checkpoint_closes_stream_at_size_limit_without_saving_artifact(self) -> None:
+        workspace = await self.client.create(self.task)
+        closed = False
+
+        async def chunks() -> AsyncIterator[bytes]:
+            yield b"1234"
+            yield b"5678"
+            self.fail("Read beyond the artifact limit")
+
+        @asynccontextmanager
+        async def oversized() -> AsyncIterator[AsyncIterator[bytes]]:
+            nonlocal closed
+            try:
+                yield chunks()
+            finally:
+                closed = True
+
+        with (
+            patch("merlin.sandbox.MAX_ARCHIVE_BYTES", 6),
+            patch.object(self.sdk.files, "read", return_value=oversized()) as read,
+            self.assertRaises(WorkspaceSetupError) as error,
+        ):
+            await self.client.checkpoint(workspace, self.task.id)
+        self.assertEqual(read.call_args.kwargs, {"format": "stream"})
+        self.assertIsInstance(error.exception.__cause__, ValueError)
+        self.assertTrue(closed)
+        self.assertFalse(list(self.settings.artifact_dir.rglob("*.tar")))
+        self.assertFalse(list(self.sdk.files.folder.glob("*.tar")))
+
+    async def test_screenshot_download_applies_bound_and_removes_remote_artifact(self) -> None:
+        workspace = await self.client.create(self.task)
+        remote = f"/tmp/merlin-screenshot-{'a' * 32}.png"
+        for content in (b"1234", b"12345"):
+            with self.subTest(size=len(content)):
+                await self.sdk.files.write(remote, content)
+                with (
+                    patch("merlin.sandbox.MAX_FILE_BYTES", 4),
+                    patch.object(self.client, "_helper", return_value={"screenshot_path": remote}),
+                ):
+                    result = await self.client.execute(
+                        workspace, ToolCall(name="browser_screenshot")
+                    )
+                self.assertEqual(result.ok, len(content) == 4)
+                if result.ok:
+                    self.assertEqual(
+                        (self.settings.artifact_dir / result.artifacts[0]).read_bytes(), content
+                    )
+                else:
+                    self.assertFalse(result.artifacts)
+                self.assertFalse(self.sdk.files.local(remote).exists())
 
     async def test_cancelled_checkpoint_is_not_retried(self) -> None:
         workspace = await self.client.create(self.task)

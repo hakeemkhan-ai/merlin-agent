@@ -45,8 +45,24 @@ class BrowserPolicyTests(unittest.TestCase):
         route = Mock(request=SimpleNamespace(url="https://docs.example.com/submit", method="POST"))
         session.route(route)
         route.abort.assert_called_once()
-        route.continue_.assert_not_called()
+        route.fetch.assert_not_called()
         self.assertEqual(session.entries[0]["kind"], "blocked_request")
+
+    def test_route_disposes_response_and_does_not_forward_unapproved_redirect(self) -> None:
+        session = BrowserSession.__new__(BrowserSession)
+        session.domains = ["docs.example.com"]
+        session.entries = []
+        session.navigation_target = None
+        session.clicking = False
+        response = Mock(status=302, headers={"location": "https://other.example.com/help"})
+        route = Mock(request=SimpleNamespace(url="https://docs.example.com/start", method="GET"))
+        route.fetch.return_value = response
+        session.route(route)
+        route.fetch.assert_called_once_with(max_redirects=0, timeout=15000)
+        route.abort.assert_called_once()
+        route.fulfill.assert_not_called()
+        response.dispose.assert_called_once()
+        self.assertEqual(session.entries[0]["kind"], "blocked_redirect")
 
     def test_model_cannot_supply_domain_policy(self) -> None:
         with self.assertRaises(ValidationError):

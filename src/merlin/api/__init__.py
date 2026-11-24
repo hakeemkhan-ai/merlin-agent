@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
+import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -468,13 +469,31 @@ def create_app(
             raise HTTPException(409, str(error)) from error
 
     @app.get("/v1/github/callback")
-    async def github_callback(code: str, state: str) -> dict[str, Any]:
+    async def github_callback(request: Request) -> JSONResponse:
         # Browser callbacks authenticate with the signed, one-use OAuth state,
         # never by putting the owner bearer token in a URL.
+        headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+        codes = request.query_params.getlist("code")
+        states = request.query_params.getlist("state")
+        if (
+            len(codes) != 1
+            or len(states) != 1
+            or not (0 < len(codes[0]) <= 4096 and 0 < len(states[0]) <= 4096)
+        ):
+            raise HTTPException(400, "Invalid GitHub authorization callback", headers=headers)
+        if github is None:
+            raise HTTPException(503, "GitHub App is not configured", headers=headers)
         try:
-            return dict(await github_service().connection_callback(code, state))
-        except (ValueError, RuntimeError) as error:
-            raise HTTPException(400, str(error)) from error
+            result = await github.connection_callback(codes[0], states[0])
+        except (ValueError, PermissionError, RuntimeError):
+            raise HTTPException(
+                400, "GitHub authorization could not be completed", headers=headers
+            ) from None
+        except httpx.HTTPError:
+            raise HTTPException(
+                502, "GitHub authorization service unavailable", headers=headers
+            ) from None
+        return JSONResponse(dict(result), headers=headers)
 
     @app.get("/v1/github/repositories", dependencies=protected)
     async def github_repositories() -> list[dict[str, Any]]:

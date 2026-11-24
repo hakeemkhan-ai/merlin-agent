@@ -21,4 +21,5 @@ USER merlin
 
 FROM base AS runtime
 USER merlin
-CMD ["uvicorn", "merlin.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+# Uvicorn access records include the OAuth callback query with one-use credentials.
+CMD ["uvicorn", "merlin.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

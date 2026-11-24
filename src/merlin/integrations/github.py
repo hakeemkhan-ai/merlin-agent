@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, unquote, urlencode
 
 import httpx
 from pydantic import Field, ValidationError
@@ -202,7 +202,12 @@ class GitHubService:
         params: dict[str, Any] | None = None,
         missing_ok: bool = False,
     ) -> Any:
-        if not path.startswith("/") or ".." in path or "?" in path or "#" in path:
+        if (
+            not path.startswith("/")
+            or {".", ".."}.intersection(unquote(path).split("/"))
+            or "?" in path
+            or "#" in path
+        ):
             raise ValueError("Invalid GitHub API path")
         safe_retry = (
             method == "GET"
@@ -449,9 +454,10 @@ class GitHubService:
     def _consume_state(self, state: str) -> dict[str, Any]:
         self._require_oauth_config()
         try:
-            if len(state) > 4096:
+            match = re.fullmatch(r"([A-Za-z0-9_-]{1,4031})\.([0-9a-f]{64})", state)
+            if match is None:
                 raise ValueError("Invalid OAuth state")
-            encoded, signature = state.split(".", 1)
+            encoded, signature = match.groups()
             expected = hmac.new(
                 self.settings.owner_token.get_secret_value().encode(),
                 encoded.encode(),
@@ -916,6 +922,30 @@ class GitHubService:
                 )
             if current != args.base_sha:
                 raise ValueError("Task branch changed; refresh the base before publishing")
+        else:
+            # Only published default-branch history may supply the initial tree.
+            # The checkpoint HEAD is controlled by the workspace, while review
+            # covers only the selected file delta against that HEAD.
+            default_ref = await self._request(
+                "GET",
+                f"{prefix}/git/ref/heads/{quote(metadata['default_branch'], safe='/')}",
+                token,
+            )
+            default_sha = default_ref.get("object", {}).get("sha", "")
+            if not isinstance(default_sha, str) or not SHA.fullmatch(default_sha):
+                raise ValueError("Invalid default branch reference")
+            if args.base_sha.lower() != default_sha.lower():
+                comparison = await self._request(
+                    "GET",
+                    f"{prefix}/compare/{args.base_sha}...{default_sha}",
+                    token,
+                    params={"per_page": 1},
+                )
+                if (
+                    comparison.get("status") != "ahead"
+                    or comparison.get("merge_base_commit", {}).get("sha") != args.base_sha.lower()
+                ):
+                    raise ValueError("First publish base is outside default branch history")
         parent = await self._request("GET", f"{prefix}/git/commits/{args.base_sha}", token)
         tree: list[dict[str, Any]] = []
         for entry in args.files:

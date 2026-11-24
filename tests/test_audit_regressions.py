@@ -120,10 +120,8 @@ def test_browser_websockets_are_intercepted_before_pages_can_connect():
 @pytest.mark.parametrize("host", ["localhost.", "LOCALHOST.", "127.0.0.1."])
 @pytest.mark.parametrize("method", ["GET", "POST"])
 def test_public_page_cannot_bypass_origin_checks_with_a_trailing_dot(host, method):
-    session = BrowserSession.__new__(BrowserSession)
-    session.domains = ["docs.example.com"]
-    session.entries = []
-    session.page = Mock(url="https://docs.example.com/untrusted")
+    session = BrowserSession(Mock(), {"allowed_domains": ["docs.example.com"]})
+    session.page.url = "https://docs.example.com/untrusted"
     request = SimpleNamespace(
         url=f"http://{host}:3000/private",
         method=method,
@@ -134,7 +132,7 @@ def test_public_page_cannot_bypass_origin_checks_with_a_trailing_dot(host, metho
     route = Mock(request=request)
     session.route(route)
     route.abort.assert_called_once()
-    route.continue_.assert_not_called()
+    route.fetch.assert_not_called()
 
 
 def test_session_repository_is_enforced_inside_the_store(store):

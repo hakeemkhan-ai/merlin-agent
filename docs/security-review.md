@@ -1,5 +1,31 @@
 # Independent implementation review
 
+## 2026-11-24 review
+
+- New task branches require a parent from the destination repository's default
+  branch history. This keeps the parent tree within published history during
+  review of a selected file delta.
+- GitHub OAuth callbacks reject ambiguous inputs and return non-cacheable,
+  non-referring responses. The packaged server and `merlin serve` disable
+  Uvicorn access logging to keep callback credentials out of request logs.
+- The browser checks each top-level redirect before opening its destination.
+  Resource redirects and redirects that require replaying a request body are
+  blocked. Older running browser daemons require a fresh workspace.
+  [Playwright routing behavior](https://playwright.dev/python/docs/api/class-page#page-route)
+- Checkpoint and screenshot downloads stop at their byte limits during transfer.
+  E2B 2.62.1 also fixes unreliable downloads over the SDK's former HTTP/2 path.
+  [E2B release notes](https://github.com/e2b-dev/E2B/releases/tag/%40e2b%2Fpython-sdk%402.62.1)
+- OpenTelemetry Python API and SDK are locked at 1.45.2. The API upgrade fixes
+  CVE-2026-126360. [OpenTelemetry advisory](https://github.com/open-telemetry/opentelemetry-python/security/advisories/GHSA-mf5v-w3w3-f6cg)
+- Compose uses OpenTelemetry Collector 0.165.0 and Jaeger 2.20.0 in all-in-one
+  mode. Jaeger 2.20 retains the HTTP query endpoints used by the Grafana data
+  source. Trivy reported zero critical findings in either replacement image.
+  The scan flagged remaining high-severity packages in Jaeger and critical
+  package findings in the PostgreSQL Alpine image and E2B Python Bookworm base.
+  Runtime exposure depends on which binaries and features use those packages.
+  [Collector release](https://github.com/open-telemetry/opentelemetry-collector-releases/releases/tag/v0.165.0)
+  [Jaeger release](https://github.com/jaegertracing/jaeger/releases/tag/v2.20.0)
+
 ## 2026-11-06 review
 
 The [security, quality, and bug review](audit-2026-11-06.md) records fixes for

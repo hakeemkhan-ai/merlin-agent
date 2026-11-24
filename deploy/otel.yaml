@@ -6,11 +6,11 @@ receivers:
 processors:
   batch: {}
 exporters:
-  otlphttp:
+  otlp_http:
     endpoint: http://jaeger:4318
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp]
+      exporters: [otlp_http]

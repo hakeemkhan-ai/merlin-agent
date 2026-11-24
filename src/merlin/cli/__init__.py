@@ -544,7 +544,7 @@ def serve(
     """Run the API. Apply migrations before starting a deployed service."""
     import uvicorn
 
-    uvicorn.run("merlin.api:create_app", host=host, port=port, factory=True)
+    uvicorn.run("merlin.api:create_app", host=host, port=port, factory=True, access_log=False)
 
 
 @app.command("init-db")

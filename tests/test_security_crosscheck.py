@@ -98,10 +98,8 @@ class SearchPolicyCrosscheck(unittest.TestCase):
 class BrowserOriginCrosscheck(unittest.TestCase):
     @staticmethod
     def session(page_url: str) -> BrowserSession:
-        session = BrowserSession.__new__(BrowserSession)
-        session.domains = ["docs.example.com"]
-        session.entries = []
-        session.page = Mock(url=page_url)
+        session = BrowserSession(Mock(), {"allowed_domains": ["docs.example.com"]})
+        session.page.url = page_url
         return session
 
     @staticmethod
@@ -121,20 +119,24 @@ class BrowserOriginCrosscheck(unittest.TestCase):
         route = self.request_route(session, "http://localhost:3000/delete", "POST")
         session.route(route)
         route.abort.assert_called_once()
-        route.continue_.assert_not_called()
+        route.fetch.assert_not_called()
 
     def test_external_page_cannot_read_sandbox_application(self) -> None:
         session = self.session("https://docs.example.com/untrusted-page")
         route = self.request_route(session, "http://127.0.0.1:3000/private", "GET")
         session.route(route)
         route.abort.assert_called_once()
-        route.continue_.assert_not_called()
+        route.fetch.assert_not_called()
 
     def test_local_application_can_still_post_to_its_backend(self) -> None:
         session = self.session("http://localhost:3000/app")
         route = self.request_route(session, "http://127.0.0.1:8000/save", "POST")
+        response = Mock(status=204, headers={})
+        route.fetch.return_value = response
         session.route(route)
-        route.continue_.assert_called_once()
+        route.fetch.assert_called_once_with(max_redirects=0, timeout=15000)
+        route.fulfill.assert_called_once_with(response=response)
+        response.dispose.assert_called_once()
         route.abort.assert_not_called()
 
     def test_public_redirect_cannot_return_to_a_previously_local_page(self) -> None:
@@ -147,7 +149,7 @@ class BrowserOriginCrosscheck(unittest.TestCase):
         )
         session.route(route)
         route.abort.assert_called_once()
-        route.continue_.assert_not_called()
+        route.fetch.assert_not_called()
 
 
 class SandboxTakeoverCrosscheck(unittest.IsolatedAsyncioTestCase):

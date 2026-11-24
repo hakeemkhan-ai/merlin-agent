@@ -59,6 +59,10 @@ class FakeGitHub:
         return {"authorization_url": "https://github.com/login/oauth/authorize?state=signed"}
 
     async def connection_callback(self, code, state):  # type: ignore[no-untyped-def]
+        if code == "access-denied":
+            raise PermissionError("private provider detail")
+        if code == "provider-unavailable":
+            raise httpx.ReadTimeout("private provider detail")
         if state != "signed":
             raise ValueError("Invalid OAuth state")
         return {"linked": True}
@@ -391,6 +395,21 @@ class APITests(TestCase):
             self.client.get("/v1/github/repositories", headers=AUTH).json()[0]["full_name"],
             "owner/repo",
         )
+
+    def test_github_callback_protects_responses_and_handles_provider_failures(self) -> None:
+        for query, expected in [
+            ("code=code&state=signed", 200),
+            ("code=access-denied&state=signed", 400),
+            ("code=provider-unavailable&state=signed", 502),
+            ("code=code&state=signed&state=second", 400),
+            ("state=signed", 400),
+        ]:
+            with self.subTest(query=query):
+                response = self.client.get(f"/v1/github/callback?{query}")
+                self.assertEqual(response.status_code, expected)
+                self.assertEqual(response.headers["cache-control"], "no-store")
+                self.assertEqual(response.headers["referrer-policy"], "no-referrer")
+                self.assertNotIn("private provider detail", response.text)
 
     def test_unknown_task_is_404(self) -> None:
         self.assertEqual(self.client.get("/v1/tasks/missing", headers=AUTH).status_code, 404)

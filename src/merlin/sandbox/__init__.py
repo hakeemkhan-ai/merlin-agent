@@ -30,6 +30,7 @@ from merlin.contracts import (
 from merlin.network import validate_domains
 from merlin.sandbox._remote import (
     MAX_ARCHIVE_BYTES,
+    MAX_FILE_BYTES,
     MAX_OUTPUT,
     TEMPLATE_TOOL_BIN,
     validate_archive,
@@ -62,6 +63,17 @@ def output_preview(output: str) -> str:
         else:
             high = middle - 1
     return output[:low]
+
+
+async def read_artifact(instance: Any, path: str, max_bytes: int) -> bytes:
+    data = bytearray()
+    async with asyncio.timeout(60):
+        async with await instance.files.read(path, format="stream") as stream:
+            async for chunk in stream:
+                if len(data) + len(chunk) > max_bytes:
+                    raise ValueError("Remote artifact exceeds size limit")
+                data.extend(chunk)
+    return bytes(data)
 
 
 class Arguments(BaseModel):
@@ -417,15 +429,16 @@ class E2BSandboxClient:
                 remote_image = data.pop("screenshot_path")
                 if not re.fullmatch(r"/tmp/merlin-screenshot-[a-f0-9]{32}\.png", remote_image):
                     raise ValueError("Invalid screenshot artifact path")
-                image = bytes(await instance.files.read(remote_image, format="bytes"))
-                if len(image) > 16 * 1024 * 1024:
-                    raise ValueError("Screenshot exceeds artifact size limit")
+                try:
+                    image = await read_artifact(instance, remote_image, MAX_FILE_BYTES)
+                finally:
+                    with contextlib.suppress(Exception):
+                        await instance.files.remove(remote_image)
                 relative_image = Path("screenshots") / (uuid4().hex + ".png")
                 image_target = self.settings.artifact_dir / relative_image
                 image_target.parent.mkdir(parents=True, exist_ok=True)
                 image_target.write_bytes(image)
                 artifacts.append(relative_image.as_posix())
-                await instance.files.remove(remote_image)
             preview = output_preview(output)
             if preview != output:
                 relative = Path("outputs") / uuid4().hex / "output.txt"
@@ -529,8 +542,8 @@ class E2BSandboxClient:
         instance = await self._instance(workspace)
         try:
             metadata = await self._helper(workspace, "capture", {"target": remote}, timeout=120)
-            data = bytes(await instance.files.read(remote, format="bytes"))
             try:
+                data = await read_artifact(instance, remote, MAX_ARCHIVE_BYTES)
                 await asyncio.to_thread(validate_archive, data)
             except (ValueError, tarfile.TarError) as error:
                 # tarfile.ReadError and the network transports' ReadError share

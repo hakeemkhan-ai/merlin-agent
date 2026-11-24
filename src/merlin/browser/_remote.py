@@ -11,13 +11,15 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
 PORT = 8765
+POLICY_VERSION = 2
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 TEMPLATE_BROWSER_DIR = "/opt/merlin-browsers"
+REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 
 def allowed_url(url: str, domains: list[str], method: str = "GET") -> bool:
@@ -46,6 +48,12 @@ def local_url(url: str) -> bool:
     )
 
 
+def navigation_identity(url: str) -> tuple[str, str | None, int, str, str]:
+    parsed = urlsplit(url)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return parsed.scheme, parsed.hostname, port, parsed.path or "/", parsed.query
+
+
 class BrowserSession:
     def __init__(self, playwright: Any, configuration: dict[str, Any]) -> None:
         self.domains = configuration["allowed_domains"]
@@ -58,6 +66,8 @@ class BrowserSession:
         self.context.route_web_socket("**/*", self.block_websocket)
         self.entries: list[dict[str, str]] = []
         self.navigation_target: str | None = None
+        self.navigation_redirect: str | None = None
+        self.clicking = False
         self.page = self.context.new_page()
         self.page.on("console", lambda message: self.record("console", message.text))
         self.page.on("pageerror", lambda error: self.record("pageerror", str(error)))
@@ -78,41 +88,109 @@ class BrowserSession:
         # setup deadlocks the pinned Playwright transport before setup returns.
         socket.on_message(lambda message: None)
 
+    def allows_local_request(self, request: Any, direct: bool) -> bool:
+        if not (direct or local_url(self.page.url)) or request.frame.page != self.page:
+            return False
+        predecessor = request.redirected_from
+        while predecessor is not None:
+            if not local_url(predecessor.url):
+                return False
+            predecessor = predecessor.redirected_from
+        if not direct:
+            frame = request.frame
+            while frame is not None:
+                if frame.url not in {"about:blank", ""} and not local_url(frame.url):
+                    return False
+                frame = frame.parent_frame
+        return True
+
     def route(self, route: Any) -> None:
         request = route.request
-        permitted = allowed_url(request.url, self.domains, request.method)
-        if permitted and local_url(request.url):
-            # Public pages cannot use the browser as a proxy into local apps.
-            # A direct, tool-requested local navigation is the only exception
-            # to requiring an already-local top-level page and ancestor frames.
-            target = getattr(self, "navigation_target", None)
-            direct = bool(
-                target
-                and local_url(target)
-                and request.is_navigation_request()
-                and request.frame == self.page.main_frame
-            )
-            predecessor = request
-            local_chain = True
-            while predecessor is not None:
-                if not local_url(predecessor.url):
-                    local_chain = False
-                    break
-                predecessor = predecessor.redirected_from
-            permitted = local_chain and (direct or local_url(self.page.url))
-            permitted = permitted and request.frame.page == self.page
-            if permitted and not direct:
-                frame = request.frame
-                while frame is not None:
-                    if frame.url not in {"about:blank", ""} and not local_url(frame.url):
-                        permitted = False
-                        break
-                    frame = frame.parent_frame
-        if permitted:
-            route.continue_()
-        else:
-            self.record("blocked_request", route.request.method + " " + route.request.url)
+        if not allowed_url(request.url, self.domains, request.method):
+            self.record("blocked_request", request.method + " " + request.url)
             route.abort()
+            return
+
+        target = self.navigation_target
+        direct = bool(
+            target
+            and request.is_navigation_request()
+            and navigation_identity(request.url) == navigation_identity(target)
+            and request.frame == self.page.main_frame
+        )
+        if local_url(request.url) and not self.allows_local_request(request, direct):
+            self.record("blocked_request", request.method + " " + request.url)
+            route.abort()
+            return
+
+        # Playwright only runs route handlers on the first request of a redirect.
+        # Fetch one response and route each allowed top-level navigation separately.
+        parsed = urlsplit(request.url)
+        fetch_options = {}
+        if parsed.hostname == "localhost.":
+            # Chromium treats the dotted spelling as loopback. Node's resolver
+            # may try DNS, so keep its upstream connection on the local hostname.
+            fetch_options["url"] = parsed._replace(
+                netloc=parsed.netloc.replace("localhost.", "localhost", 1)
+            ).geturl()
+        try:
+            response = route.fetch(max_redirects=0, timeout=15000, **fetch_options)
+        except Exception:
+            route.abort()
+            return
+        try:
+            location = response.headers.get("location")
+            if 300 <= response.status < 400 and location:
+                try:
+                    destination = urljoin(request.url, location)
+                except ValueError:
+                    destination = ""
+                click_navigation = (
+                    self.clicking
+                    and request.is_navigation_request()
+                    and request.frame == self.page.main_frame
+                )
+                redirects_to_get = (
+                    request.method == "GET"
+                    or response.status == 303
+                    and request.method != "HEAD"
+                    or response.status in {301, 302}
+                    and request.method == "POST"
+                )
+                if (
+                    (direct or click_navigation)
+                    and redirects_to_get
+                    and response.status in REDIRECT_STATUSES
+                    and allowed_url(destination, self.domains)
+                    and (not local_url(destination) or local_url(request.url))
+                ):
+                    self.navigation_redirect = destination
+                    route.fulfill(status=200, content_type="text/html", body="")
+                    return
+                self.record("blocked_redirect", request.method + " " + request.url)
+                route.abort()
+                return
+            route.fulfill(response=response)
+        finally:
+            response.dispose()
+
+    def navigate(self, url: str) -> None:
+        deadline = time.monotonic() + 20
+        try:
+            for _ in range(9):
+                remaining = int((deadline - time.monotonic()) * 1000)
+                if remaining <= 0:
+                    raise ValueError("Browser navigation deadline exceeded")
+                self.navigation_target = url
+                self.navigation_redirect = None
+                self.page.goto(url, wait_until="domcontentloaded", timeout=remaining)
+                if self.navigation_redirect is None:
+                    return
+                url = self.navigation_redirect
+            raise ValueError("Browser navigation exceeded the redirect limit")
+        finally:
+            self.navigation_target = None
+            self.navigation_redirect = None
 
     def execute(self, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if operation == "browser_open":
@@ -121,18 +199,22 @@ class BrowserSession:
                 raise ValueError(
                     "URL is outside approved public domains or sandbox-local applications"
                 )
-            self.navigation_target = url
-            try:
-                self.page.goto(url, wait_until="domcontentloaded", timeout=20000)
-            finally:
-                self.navigation_target = None
+            self.navigate(url)
         elif operation == "browser_click":
             if not local_url(self.page.url):
                 raise ValueError(
                     "External website interactions are disabled; "
                     "clicks require a sandbox-local application"
                 )
-            self.page.locator(arguments["selector"]).click()
+            self.clicking = True
+            try:
+                self.page.locator(arguments["selector"]).click()
+                redirect = self.navigation_redirect
+            finally:
+                self.clicking = False
+                self.navigation_redirect = None
+            if redirect is not None:
+                self.navigate(redirect)
         elif operation == "browser_screenshot":
             target = Path("/tmp") / ("merlin-screenshot-" + uuid4().hex + ".png")
             self.page.screenshot(path=str(target), full_page=True, timeout=15000)
@@ -183,7 +265,7 @@ def serve(configuration_file: str) -> None:
                 try:
                     request = json.loads(self.rfile.read(length))
                     if request["operation"] == "ping":
-                        result = {"root": configuration["root"]}
+                        result = {"root": configuration["root"], "policy_version": POLICY_VERSION}
                     else:
                         result = session.execute(request["operation"], request.get("arguments", {}))
                     response = {"ok": True, "data": result}
@@ -228,7 +310,9 @@ def operate(request: dict[str, Any]) -> dict[str, Any]:
         if candidate["root"] != root or candidate["allowed_domains"] != domains:
             raise ValueError("Browser policy differs from the workspace policy")
         try:
-            _request(candidate, "ping", {}, timeout=1)
+            status = _request(candidate, "ping", {}, timeout=1)
+            if status.get("policy_version") != POLICY_VERSION:
+                raise ValueError("Start a fresh workspace to use the current browser policy")
             configuration = candidate
         except (OSError, URLError):
             pass

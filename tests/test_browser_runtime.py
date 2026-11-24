@@ -21,7 +21,14 @@ def local_application():
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             requests.append(("GET", self.path, self.headers.get("Upgrade")))
+            if self.path == "/start":
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
             body = b"<body>Local fixture application</body>"
+            if self.path == "/form":
+                body = b'<form method="post" action="/submit"><button>Save</button></form>'
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(body)))
@@ -30,6 +37,11 @@ def local_application():
 
         def do_POST(self):
             requests.append(("POST", self.path, None))
+            if self.path == "/submit":
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
             self.send_response(204)
             self.end_headers()
 
@@ -109,3 +121,22 @@ def test_direct_local_navigation_and_http_interaction_still_work(
     )
     assert status == 204
     assert ("POST", "/save", None) in requests
+
+
+def test_local_open_follows_approved_navigation_redirect(browser_session, local_application):
+    port, requests = local_application
+    origin = f"http://127.0.0.1:{port}"
+    result = browser_session.execute("browser_open", {"url": origin + "/start"})
+    assert result["url"] == origin + "/"
+    assert result["output"] == "Local fixture application"
+    assert [(method, path) for method, path, _ in requests][:2] == [("GET", "/start"), ("GET", "/")]
+
+
+def test_local_click_follows_form_confirmation_redirect(browser_session, local_application):
+    port, requests = local_application
+    origin = f"http://127.0.0.1:{port}"
+    browser_session.execute("browser_open", {"url": origin + "/form"})
+    result = browser_session.execute("browser_click", {"selector": "button"})
+    assert result["url"] == origin + "/"
+    assert result["output"] == "Local fixture application"
+    assert requests.count(("POST", "/submit", None)) == 1

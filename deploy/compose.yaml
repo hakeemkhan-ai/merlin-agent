@@ -100,7 +100,7 @@ services:
     mem_limit: ${MERLIN_EDGE_MEMORY:-256m}
     pids_limit: ${MERLIN_EDGE_PIDS:-128}
   otel:
-    image: otel/opentelemetry-collector:0.120.0
+    image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector:0.165.0
     command: [--config=/etc/otel.yaml]
     volumes:
       - ./otel.yaml:/etc/otel.yaml:ro
@@ -109,9 +109,8 @@ services:
     mem_limit: ${MERLIN_OTEL_MEMORY:-256m}
     pids_limit: ${MERLIN_OTEL_PIDS:-128}
   jaeger:
-    image: jaegertracing/all-in-one:1.65.0
-    environment:
-      COLLECTOR_OTLP_ENABLED: "true"
+    # Grafana's data source uses the HTTP query endpoints retained through 2.20.
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.20.0
     ports: ["127.0.0.1:16686:16686"]
     restart: unless-stopped
     cpus: ${MERLIN_JAEGER_CPUS:-1.0}
