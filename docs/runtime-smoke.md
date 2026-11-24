@@ -15,7 +15,7 @@ generates disposable database/owner credentials. It does not read production
 ## What is checked
 
 1. Start PostgreSQL 17 and apply the real Alembic migrations.
-2. Run nine real PostgreSQL tests covering claim caps, concurrent root budgets,
+2. Run the PostgreSQL tests covering claim caps, concurrent root budgets,
    stale-lease fencing, cancellation, restart durability, and migration roundtrips.
    These finish before the fixture worker starts so database-level advisory locks
    cannot interfere with the concurrency assertions.
@@ -24,7 +24,8 @@ generates disposable database/owner credentials. It does not read production
    worker presence; each worker container also needs its own fresh heartbeat.
    Submit a task over HTTP and check durable events,
    checkpoint metadata, and exactly one recorded fixture effect.
-4. Restart API and worker containers and verify the completed task and events.
+4. Restart the API and worker containers, wait for both health checks, and
+   verify the completed task and events.
 5. Submit another task, kill the worker with SIGKILL after an unfinished mutation,
    and start its replacement. Verify that the task pauses instead of replaying it.
 6. Explicitly acknowledge that synthetic uncertain outcome through the owner API,

@@ -73,6 +73,12 @@ class RuntimeSmokeTests(unittest.TestCase):
             if command[-2:] == ("api", "worker") and "up" in command
         )
         self.assertLess(pg_index, start_index)
+        restart_index = next(i for i, command in enumerate(commands) if "restart" in command)
+        complete_after_restart = commands[restart_index + 2]
+        self.assertEqual(commands[restart_index + 1], commands[start_index])
+        self.assertIn("--wait", commands[restart_index + 1])
+        self.assertIn("--no-recreate", commands[restart_index + 1])
+        self.assertEqual(complete_after_restart[-1], "verify-complete")
         self.assertEqual(
             commands[-1][-5:], ("down", "--volumes", "--remove-orphans", "--timeout", "5")
         )

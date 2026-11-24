@@ -18,6 +18,18 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+WAIT_FOR_RUNTIME = (
+    "up",
+    "-d",
+    "--no-build",
+    "--no-deps",
+    "--no-recreate",
+    "--wait",
+    "--wait-timeout",
+    "90",
+    "api",
+    "worker",
+)
 STEPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Build locked application and verification images", ("build", "api", "checks")),
     ("Start isolated PostgreSQL", ("up", "-d", "--wait", "--wait-timeout", "90", "postgres")),
@@ -40,10 +52,7 @@ STEPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "/checks/test_postgres.py",
         ),
     ),
-    (
-        "Start real API and fixture worker",
-        ("up", "-d", "--no-build", "--no-deps", "--wait", "--wait-timeout", "90", "api", "worker"),
-    ),
+    ("Start real API and fixture worker", WAIT_FOR_RUNTIME),
     (
         "Verify database schema and worker readiness",
         ("run", "--rm", "--no-deps", "checks", "python", "/checks/runtime_probe.py", "ready"),
@@ -53,6 +62,8 @@ STEPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("run", "--rm", "--no-deps", "checks", "python", "/checks/runtime_probe.py", "complete"),
     ),
     ("Restart API and worker processes", ("restart", "api", "worker")),
+    # Compose restart returns before either restarted service is ready.
+    ("Wait for restarted API and worker readiness", WAIT_FOR_RUNTIME),
     (
         "Verify persisted task and events",
         (
